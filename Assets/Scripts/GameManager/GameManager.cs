@@ -27,8 +27,11 @@ public class GameManager : MonoBehaviour {
     private Text stateText;
 
     // private.
+    private GameObject grabedDropObject;
     private GameState currentState;
     private Drop selectedDrop;
+    private const float SelectedDropAlpha = 0.2f;
+    private const float GrabedDropAlpha = 0.6f;
 
     //-------------------------------------------------------
     // MonoBehaviour Function
@@ -75,8 +78,7 @@ public class GameManager : MonoBehaviour {
     {
         if (Input.GetMouseButtonDown(0))
         {
-            selectedDrop = board.GetNearestDrop(Input.mousePosition);
-            currentState = GameState.DropMove;
+            SelectDrop();
         }
     }
 
@@ -90,8 +92,11 @@ public class GameManager : MonoBehaviour {
             {
                 board.SwitchDrop(selectedDrop, drop);
             }
+            grabedDropObject.transform.localPosition = Input.mousePosition + Vector3.up * 10;
         }
         else if (Input.GetMouseButtonUp(0)) {
+            selectedDrop.SetDropAlpha(1f);
+            Destroy(grabedDropObject);
             currentState = GameState.MatchCheck;
         }
     }
@@ -121,5 +126,19 @@ public class GameManager : MonoBehaviour {
     {
         currentState = GameState.Wait;
         StartCoroutine(board.FillDrop(() => currentState = GameState.MatchCheck));
+    }
+
+    //　ドロップを選択する処理
+    private void SelectDrop()
+    {
+      selectedDrop = board.GetNearestDrop(Input.mousePosition);
+      var drop = board.InstantiateDrop(Input.mousePosition);
+      drop.SetKind(selectedDrop.GetKind());
+      drop.SetSize((int)(board.dropWidth * 1.2f));
+      drop.SetDropAlpha(GrabedDropAlpha);
+      grabedDropObject = drop.gameObject;
+
+      selectedDrop.SetDropAlpha(SelectedDropAlpha);
+      currentState = GameState.DropMove;
     }
 }

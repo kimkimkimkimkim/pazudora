@@ -36,6 +36,14 @@ public class Drop : MonoBehaviour
         SetColor();
     }
 
+    // ピースの透過を設定する
+    public void SetDropAlpha(float alpha)
+    {
+        var col = thisImage.color;
+        col.a = alpha;
+        thisImage.color = col;
+    }
+
     // ピースの種類を返す
     public DropKind GetKind()
     {

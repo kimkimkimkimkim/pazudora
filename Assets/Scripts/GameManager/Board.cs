@@ -2,21 +2,30 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using DG.Tweening;
 
 // 盤面クラス
 public class Board : MonoBehaviour {
+
+    //public
+    public int dropWidth;
 
     // serialize field.
     [SerializeField]
     private GameObject dropPrefab;
 
+    // const
+    private const float FillDropDuration = 0.2f;
+    private const float SwitchDropDuration = 0.02f;
+    private const float SwitchDropOffset = 200;
+
     // private.
     private Drop[,] board;
     private int width;
     private int height;
-    private int dropWidth;
     private int randomSeed;
-    private Vector2[] directions = new Vector2[4]{new Vector2(1,0),new Vector2(-1,0),new Vector2(0,1),new Vector2(0,-1)};
+    private Vector2[] directions = new Vector2[] { Vector2.up, Vector2.down, Vector2.right, Vector2.left };
+    private List<Vector2> dropCreatePos = new List<Vector2>();
 
     //-------------------------------------------------------
     // Public Function
@@ -61,18 +70,26 @@ public class Board : MonoBehaviour {
     }
 
     // 盤面上のピースを交換する
-    public void SwitchDrop(Drop p1, Drop p2)
+    public void SwitchDrop(Drop p1, Drop p2) //p1がselected
     {
-        // 位置を移動する
-        var p1Position = p1.transform.localPosition;
-        p1.transform.localPosition = p2.transform.localPosition;
-        p2.transform.localPosition = p1Position;
+      var p1Position = p1.transform.localPosition;
+      var p2Position = p2.transform.localPosition;
+      var p1BoardPos = GetDropBoardPos(p1);
+      var p2BoardPos = GetDropBoardPos(p2);
+      var isHoriAnim = p1BoardPos.y==p2BoardPos.y; //水平方向のアニメーションかどうか
+      var xOffset = (isHoriAnim)?0:SwitchDropOffset;
+      var yOffset = (isHoriAnim)?SwitchDropOffset:0;
 
-        // 盤面データを更新する
-        var p1BoardPos = GetDropBoardPos(p1);
-        var p2BoardPos = GetDropBoardPos(p2);
-        board[(int)p1BoardPos.x, (int)p1BoardPos.y] = p2;
-        board[(int)p2BoardPos.x, (int)p2BoardPos.y] = p1;
+      // 位置を移動する
+      var midPosition = new Vector3((p1Position.x+p2Position.x)/2,(p1Position.y+p2Position.y)/2,0);
+      Vector3[] path1 = {new Vector3(midPosition.x-xOffset, midPosition.y+yOffset, 0),p2Position};
+      Vector3[] path2 = {new Vector3(midPosition.x+xOffset, midPosition.y-yOffset, 0),p1Position};
+      p1.transform.DOLocalPath(path1, SwitchDropDuration, PathType.CatmullRom).SetEase(Ease.OutQuad);
+      p2.transform.DOLocalPath(path2, SwitchDropDuration, PathType.CatmullRom).SetEase(Ease.OutQuad);
+
+      // 盤面データを更新する
+      board[(int)p1BoardPos.x, (int)p1BoardPos.y] = p2;
+      board[(int)p2BoardPos.x, (int)p2BoardPos.y] = p1;
     }
 
     // 盤面上にマッチングしているピースがあるかどうかを判断する
@@ -107,16 +124,27 @@ public class Board : MonoBehaviour {
     // ピースが消えている場所を詰めて、新しいピースを生成する
     public IEnumerator FillDrop(Action endCallBack)
     {
-        for (int i = 0; i < width; i++)
-        {
-            for (int j = 0; j < height; j++)
-            {
-                FillDrop(new Vector2(i, j));
-            }
-        }
+      // ピース生成位置保持リストを初期化する
+      dropCreatePos.Clear();
 
-        yield return new WaitForSeconds(1f);
-        endCallBack();
+      for (int i = 0; i < width; i++)
+      {
+          for (int j = 0; j < height; j++)
+          {
+              FillDrop(new Vector2(i, j));
+          }
+      }
+
+      yield return new WaitForSeconds(1f);
+      endCallBack();
+    }
+
+    //ドロップのオブジェクトを生成する
+    public Drop InstantiateDrop(Vector3 createPos)
+    {
+      var drop = Instantiate(dropPrefab).GetComponent<Drop>();
+      drop.transform.SetParent(transform);
+      return drop;
     }
 
     //-------------------------------------------------------
@@ -125,23 +153,32 @@ public class Board : MonoBehaviour {
     // 特定の位置にピースを作成する
     private void CreateDrop(Vector2 position)
     {
+        //　ドロップの位置を求める
+        var dropPos = GetDropWorldPos(position);
+
         // ピースの生成位置を求める
-        var createPos = GetDropWorldPos(position);
+        var createPos = new Vector2(position.x, height);
+        while (dropCreatePos.Contains(createPos))
+        {
+            createPos += Vector2.up;
+        }
+
+        dropCreatePos.Add(createPos);
+        var dropCreateWorldPos = GetDropWorldPos(createPos);
+
         // 生成するピースの種類をランダムに決める
         var kind = (DropKind)UnityEngine.Random.Range(0, Enum.GetNames(typeof(DropKind)).Length);
 
         // ピースを生成、ボードの子オブジェクトにする
-        /*
-        var drop = Instantiate(dropPrefab, createPos, Quaternion.identity).GetComponent<Drop>();
-        drop.transform.SetParent(transform);
-        drop.SetSize(dropWidth);
-        drop.SetKind(kind);
-        */
         var drop = Instantiate(dropPrefab).GetComponent<Drop>();
         drop.transform.SetParent(transform);
-        drop.transform.localPosition = createPos;
+        drop.transform.localPosition = dropCreateWorldPos;
         drop.SetSize(dropWidth);
         drop.SetKind(kind);
+
+        //　アニメーション
+        drop.transform.DOLocalMove(dropPos, FillDropDuration).SetEase(Ease.Linear);
+
 
         // 盤面にピースの情報をセットする
         board[(int)position.x, (int)position.y] = drop;
@@ -214,30 +251,31 @@ public class Board : MonoBehaviour {
     // 特定のピースのが削除されているかを判断し、削除されているなら詰めるか、それができなければ新しく生成する
     private void FillDrop(Vector2 pos)
     {
-        var drop = board[(int)pos.x, (int)pos.y];
-        if (drop != null && !drop.deleteFlag)
-        {
-            // ピースが削除されていなければ何もしない
-            return;
-        }
 
-        // 対象のピースより上方向に有効なピースがあるかを確認、あるなら場所を移動させる
-        var checkPos = pos + Vector2.up;
-        while (IsInBoard(checkPos))
-        {
-            var checkDrop = board[(int)checkPos.x, (int)checkPos.y];
-            if (checkDrop != null && !checkDrop.deleteFlag)
-            {
-                checkDrop.transform.localPosition = GetDropWorldPos(pos);
-                board[(int)pos.x, (int)pos.y] = checkDrop;
-                board[(int)checkPos.x, (int)checkPos.y] = null;
-                return;
-            }
-            checkPos += Vector2.up;
-        }
+      var drop = board[(int)pos.x, (int)pos.y];
+      if (drop != null && !drop.deleteFlag)
+      {
+        // ピースが削除されていなければ何もしない
+        return;
+      }
 
-        // 有効なピースがなければ新しく作る
-        CreateDrop(pos);
+      // 対象のピースより上方向に有効なピースがあるかを確認、あるなら場所を移動させる
+      var checkPos = pos + Vector2.up;
+      while (IsInBoard(checkPos))
+      {
+        var checkDrop = board[(int)checkPos.x, (int)checkPos.y];
+        if (checkDrop != null && !checkDrop.deleteFlag)
+        {
+          checkDrop.transform.DOLocalMove(GetDropWorldPos(pos), FillDropDuration).SetEase(Ease.Linear);
+          board[(int)pos.x, (int)pos.y] = checkDrop;
+          board[(int)checkPos.x, (int)checkPos.y] = null;
+          return;
+        }
+        checkPos += Vector2.up;
+      }
+
+      // 有効なピースがなければ新しく作る
+      CreateDrop(pos);
     }
 
     // 特定のピースがマッチしている場合、ほかのマッチしたピースとともに削除する
